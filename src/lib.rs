@@ -1,115 +1,100 @@
 use std::{
-    fmt::{self, Display},
-    fs::File,
-    io::{self, BufWriter, Write},
-    iter,
-    path::{Path, PathBuf},
-    str::FromStr,
+    collections::HashMap, fmt::self, fs::File, io::{self, BufWriter, Write}, iter, path::{Path, PathBuf}, str::FromStr,
 };
 
-pub struct Generator {
+#[derive(Clone, Debug)]
+pub struct Generator<Prob, S, V> {
+    problem: Prob,
+    solver: S,
+    verifier: V,
     gen_dir: PathBuf,
-    names: Box<[(String, u32)]>,
+    set_id_width: usize,
+    test_num_width: usize,
+    id_cnt: HashMap<String, (usize, usize)>,
 }
 
-impl Generator {
-    pub fn new<P: ?Sized + AsRef<Path>>(gen_dir: &P) -> Self {
-        Self::with_names(gen_dir, &["test", "sample"])
+impl<Prob: Problem + Default, S: Solver<Prob> + Default, V: Verifier<Prob> + Default> Default for Generator<Prob, S, V> {
+    fn default() -> Self {
+        Self::new(Prob::default(), S::default(), V::default(), "testcase", 1, 2)
     }
+}
 
-    pub fn with_names<P: ?Sized + AsRef<Path>, T: AsRef<str>>(gen_dir: &P, names: &[T]) -> Self {
+#[derive(Debug)]
+pub enum GenerateError<VE> {
+    Io(io::Error),
+    Verify(VE),
+}
+
+impl<VE: fmt::Display> fmt::Display for GenerateError<VE> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(io_err) => write!(f, "{}", io_err),
+            Self::Verify(verify_err) => write!(f, "verify error: {}", verify_err),
+        }
+    }
+}
+
+impl<Prob: Problem, S: Solver<Prob>, V: Verifier<Prob>> Generator<Prob, S, V> {
+    pub fn new<P: ?Sized + AsRef<Path>>(
+        problem: Prob,
+        solver: S,
+        verifier: V,
+        gen_dir: &P,
+        set_id_width: usize,
+        test_num_width: usize,
+    ) -> Self {
         Self {
+            id_cnt: problem.testset_list().iter().enumerate().map(|(i, &ts)| (problem.testset_name(ts).to_owned(), (i, 0))).collect(),
+            problem,
+            solver,
+            verifier,
             gen_dir: gen_dir.as_ref().to_owned(),
-            names: names.iter().map(|name| (name.as_ref().to_owned(), 0)).collect(),
+            set_id_width,
+            test_num_width,
         }
     }
 
-    pub fn next_writer(&mut self, idx: usize) -> BufWriter<File> {
-        let (test_name, count) = &mut self.names[idx];
-        let file_name = format!("{idx}_{}{:02}", test_name, count);
-        *count += 1;
-
-        self.gen_dir.push(file_name);
-        let file = File::create(&self.gen_dir).expect("file creation failed");
-        self.gen_dir.pop();
-        BufWriter::new(file)
-    }
-
-    pub fn next_test_writer(&mut self) -> BufWriter<File> {
-        assert_eq!("test", &self.names[0].0);
-        self.next_writer(0)
-    }
-
-    pub fn make_with_id<I: ?Sized + Display, O: ?Sized + Display>(
+    pub fn generate(
         &mut self,
-        input: &I,
-        output: &O,
-        id: usize,
-    ) -> io::Result<()> {
-        let (test_name, count) = &mut self.names[id];
-        let file_name = format!("{id}_{test_name}{count:02}.txt");
-        *count += 1;
-        self.write_to(input, output, &file_name)?;
-
+        input: &Prob::I,
+        testset: Prob::TestSet,
+    ) -> Result<(), GenerateError<V::Err>> {
+        self.verifier.verify(&self.problem, testset, input).map_err(GenerateError::Verify)?;
+        let output = self.solver.solve(&self.problem, input);
+        let ts_name = self.problem.testset_name(testset);
+        let (id_mut, count_mut) = self.id_cnt.get_mut(ts_name).unwrap();
+        let file_name = format!("{:03$}_{}_{:04$}.txt", *id_mut, ts_name, *count_mut, self.set_id_width, self.test_num_width);
+        write_in_out(&mut self.gen_dir, input, &output, &file_name).map_err(GenerateError::Io)?;
+        *count_mut += 1;
         Ok(())
     }
+}
 
-    pub fn make_test<I: ?Sized + Display, O: ?Sized + Display>(
-        &mut self,
-        input: &I,
-        output: &O,
-    ) -> io::Result<()> {
-        assert_eq!("test", &self.names[0].0);
-        self.make_with_id(input, output, 0)
-    }
+fn write_in_out<I: ?Sized + fmt::Display, O: ?Sized + fmt::Display>(
+    gen_dir: &mut PathBuf,
+    input: &I,
+    output: &O,
+    name: &str,
+) -> io::Result<()> {
+    gen_dir.push("input");
+    gen_dir.push(name);
+    let in_file = File::create(&gen_dir)?;
+    gen_dir.pop();
+    gen_dir.pop();
 
-    pub fn make_sample<I: ?Sized + Display, O: ?Sized + Display>(
-        &mut self,
-        input: &I,
-        output: &O,
-    ) -> io::Result<()> {
-        assert_eq!("sample", &self.names[1].0);
-        self.make_with_id(input, output, 1)
-    }
+    gen_dir.push("output");
+    gen_dir.push(name);
+    let out_file = File::create(&gen_dir)?;
+    gen_dir.pop();
+    gen_dir.pop();
 
-    pub fn write_to<I: ?Sized + Display, O: ?Sized + Display>(
-        &mut self,
-        input: &I,
-        output: &O,
-        name: &str,
-    ) -> io::Result<()> {
-        self.gen_dir.push("input");
-        self.gen_dir.push(name);
-        let in_file = File::create(&self.gen_dir)?;
-        self.gen_dir.pop();
-        self.gen_dir.pop();
+    let mut writer = BufWriter::new(in_file);
+    write!(writer, "{input}")?;
 
-        self.gen_dir.push("output");
-        self.gen_dir.push(name);
-        let out_file = File::create(&self.gen_dir)?;
-        self.gen_dir.pop();
-        self.gen_dir.pop();
+    let mut writer = BufWriter::new(out_file);
+    write!(writer, "{output}")?;
 
-        let mut writer = BufWriter::new(in_file);
-        write!(writer, "{input}")?;
-
-        let mut writer = BufWriter::new(out_file);
-        write!(writer, "{output}")?;
-
-        Ok(())
-    }
-
-    pub fn sample_num(&self) -> u32 {
-        self.names[1].1
-    }
-
-    pub fn test_num(&self) -> u32 {
-        self.names[0].1
-    }
-
-    pub fn num(&self, idx: usize) -> u32 {
-        self.names[idx].1
-    }
+    Ok(())
 }
 
 pub struct InputReader<I> {
@@ -165,7 +150,7 @@ pub enum MultiInputError<Err> {
     Child(Err),
 }
 
-impl<I: Display> Display for MultiInput<I> {
+impl<I: fmt::Display> fmt::Display for MultiInput<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{}", self.inputs.len())?;
         for input in &self.inputs {
@@ -175,7 +160,7 @@ impl<I: Display> Display for MultiInput<I> {
     }
 }
 
-impl<O: Display> Display for MultiOutput<O> {
+impl<O: fmt::Display> fmt::Display for MultiOutput<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for output in &self.outputs {
             write!(f, "{output}")?;
@@ -200,7 +185,7 @@ impl<T: Input> Input for MultiInput<T> {
     }
 }
 
-impl<Err: Display> Display for MultiInputError<Err> {
+impl<Err: fmt::Display> fmt::Display for MultiInputError<Err> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CaseNum => writeln!(f, "failed to parse case num"),
@@ -215,22 +200,74 @@ impl<Err> From<Err> for MultiInputError<Err> {
     }
 }
 
-pub trait Solver<I> {
-    type Output: Sized;
-    fn solve(&self, input: &I) -> Self::Output;
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct MultiSolver<S: ?Sized> {
+    inner: S,
+}
 
-    fn solve_multi(&self, inputs: &MultiInput<I>) -> MultiOutput<Self::Output> {
+impl<S> MultiSolver<S> {
+    pub fn new(solver: S) -> Self {
+        Self { inner: solver }
+    }
+}
+
+impl<S: ?Sized> MultiSolver<S> {
+    pub fn from_ref(solver: &S) -> &Self {
+        unsafe { &*(solver as *const _ as *const Self) }
+    }
+
+    pub fn from_mut(solver: &mut S) -> &mut Self {
+        unsafe { &mut *(solver as *mut _ as *mut Self) }
+    }
+}
+
+pub trait Problem {
+    type I: Input + fmt::Display;
+    type O: fmt::Display;
+    type TestSet: Copy;
+
+    fn testset_list(&self) -> &[Self::TestSet];
+    fn testset_name(&self, testset: Self::TestSet) -> &str;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MultiProblem<P> {
+    inner: P,
+}
+
+impl<P: Problem> Problem for MultiProblem<P> {
+    type I = MultiInput<P::I>;
+    type O = MultiOutput<P::O>;
+    type TestSet = P::TestSet;
+
+    fn testset_list(&self) -> &[Self::TestSet] {
+        self.inner.testset_list()
+    }
+    fn testset_name(&self, testset: Self::TestSet) -> &str {
+        self.inner.testset_name(testset)
+    }
+}
+
+pub trait Solver<P: Problem> {
+    fn solve(&self, problem: &P, input: &P::I) -> P::O;
+}
+
+impl<P: Problem, S: Solver<P>> Solver<MultiProblem<P>> for MultiSolver<S> {
+    fn solve(&self, problem: &MultiProblem<P>, input: &<MultiProblem<P> as Problem>::I) -> <MultiProblem<P> as Problem>::O {
         MultiOutput {
-            outputs: inputs
-                .inputs
-                .iter()
-                .map(|input| self.solve(input))
-                .collect(),
+            outputs: input.inputs.iter().map(|i| self.inner.solve(&problem.inner, i)).collect()
         }
     }
 }
 
-pub trait Verifier<I> {
+pub trait Verifier<P: Problem> {
     type Err;
-    fn verify(&self, input: &I) -> Result<(), Self::Err>;
+    fn verify(&self, problem: &P, test_set: P::TestSet, input: &P::I) -> Result<(), Self::Err>;
+}
+
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
 }
