@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, fmt::self, fs::File, io::{self, BufWriter, Write}, iter, path::{Path, PathBuf}, str::FromStr,
+    collections::HashMap, error, fmt::self, fs::File, io::{self, BufWriter, Write}, iter, path::{Path, PathBuf}, str::FromStr,
 };
 
 #[derive(Clone, Debug)]
@@ -30,6 +30,15 @@ impl<VE: fmt::Display> fmt::Display for GenerateError<VE> {
         match self {
             Self::Io(io_err) => write!(f, "{}", io_err),
             Self::Verify(verify_err) => write!(f, "verify error: {}", verify_err),
+        }
+    }
+}
+
+impl<VE: error::Error> error::Error for GenerateError<VE> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Self::Io(io) => io.source(),
+            Self::Verify(ve) => ve.source(),
         }
     }
 }
@@ -190,6 +199,15 @@ impl<Err: fmt::Display> fmt::Display for MultiInputError<Err> {
         match self {
             Self::CaseNum => writeln!(f, "failed to parse case num"),
             Self::Child(err) => err.fmt(f),
+        }
+    }
+}
+
+impl<Err: error::Error> error::Error for MultiInputError<Err> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Self::CaseNum => None,
+            Self::Child(err) => err.source(),
         }
     }
 }
