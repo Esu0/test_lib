@@ -1,3 +1,5 @@
+pub mod random_select_set;
+
 use std::{
     collections::HashMap, error, fmt::self, fs::File, io::{self, BufWriter, Write}, iter, path::{Path, PathBuf}, str::FromStr,
 };
