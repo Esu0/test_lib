@@ -71,6 +71,7 @@ impl RandomSelectSet {
     pub fn take_random<R: ?Sized + RngExt>(&mut self, rng: &mut R) -> usize {
         let idx = self.random_index(rng);
         self.tree[idx] -= 1;
+        self.update(idx);
         idx - self.len
     }
 
@@ -78,6 +79,7 @@ impl RandomSelectSet {
         let idx = i + self.len;
         if self.tree[idx] == 0 {
             self.tree[idx] = 1;
+            self.update(idx);
             true
         } else {
             false
@@ -88,9 +90,19 @@ impl RandomSelectSet {
         let idx = i + self.len;
         if self.tree[idx] > 0 {
             self.tree[idx] -= 1;
+            self.update(idx);
             true
         } else {
             false
+        }
+    }
+
+    fn update(&mut self, leaf_idx: usize) {
+        assert!(leaf_idx >= self.len);
+        let mut cur = leaf_idx / 2;
+        while cur > 0 {
+            self.tree[cur] = self.tree[cur * 2] + self.tree[cur * 2 + 1];
+            cur /= 2;
         }
     }
 }
