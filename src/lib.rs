@@ -1,7 +1,13 @@
 pub mod random_select_set;
 
 use std::{
-    collections::HashMap, error, fmt::self, fs::File, io::{self, BufWriter, Write}, iter, path::{Path, PathBuf}, str::FromStr,
+    collections::HashMap,
+    error, fmt,
+    fs::File,
+    io::{self, BufWriter, Write},
+    iter,
+    path::{Path, PathBuf},
+    str::FromStr,
 };
 
 #[derive(Clone, Debug)]
@@ -15,9 +21,18 @@ pub struct Generator<Prob, S, V> {
     id_cnt: HashMap<String, (usize, usize)>,
 }
 
-impl<Prob: Problem + Default, S: Solver<Prob> + Default, V: Verifier<Prob> + Default> Default for Generator<Prob, S, V> {
+impl<Prob: Problem + Default, S: Solver<Prob> + Default, V: Verifier<Prob> + Default> Default
+    for Generator<Prob, S, V>
+{
     fn default() -> Self {
-        Self::new(Prob::default(), S::default(), V::default(), "testcase", 1, 2)
+        Self::new(
+            Prob::default(),
+            S::default(),
+            V::default(),
+            "testcase",
+            1,
+            2,
+        )
     }
 }
 
@@ -55,7 +70,12 @@ impl<Prob: Problem, S: Solver<Prob>, V: Verifier<Prob>> Generator<Prob, S, V> {
         test_num_width: usize,
     ) -> Self {
         Self {
-            id_cnt: problem.testset_list().iter().enumerate().map(|(i, &ts)| (problem.testset_name(ts).to_owned(), (i, 0))).collect(),
+            id_cnt: problem
+                .testset_list()
+                .iter()
+                .enumerate()
+                .map(|(i, &ts)| (problem.testset_name(ts).to_owned(), (i, 0)))
+                .collect(),
             problem,
             solver,
             verifier,
@@ -70,11 +90,16 @@ impl<Prob: Problem, S: Solver<Prob>, V: Verifier<Prob>> Generator<Prob, S, V> {
         input: &Prob::I,
         testset: Prob::TestSet,
     ) -> Result<(), GenerateError<V::Err>> {
-        self.verifier.verify(&self.problem, testset, input).map_err(GenerateError::Verify)?;
+        self.verifier
+            .verify(&self.problem, testset, input)
+            .map_err(GenerateError::Verify)?;
         let output = self.solver.solve(&self.problem, input);
         let ts_name = self.problem.testset_name(testset);
         let (id_mut, count_mut) = self.id_cnt.get_mut(ts_name).unwrap();
-        let file_name = format!("{:03$}_{}_{:04$}.txt", *id_mut, ts_name, *count_mut, self.set_id_width, self.test_num_width);
+        let file_name = format!(
+            "{:03$}_{}_{:04$}.txt",
+            *id_mut, ts_name, *count_mut, self.set_id_width, self.test_num_width
+        );
         write_in_out(&mut self.gen_dir, input, &output, &file_name).map_err(GenerateError::Io)?;
         *count_mut += 1;
         Ok(())
@@ -256,6 +281,18 @@ pub struct MultiProblem<P> {
     inner: P,
 }
 
+impl<P> From<P> for MultiProblem<P> {
+    fn from(value: P) -> Self {
+        Self { inner: value }
+    }
+}
+
+impl<P> MultiProblem<P> {
+    pub const fn new(child: P) -> Self {
+        Self { inner: child }
+    }
+}
+
 impl<P: Problem> Problem for MultiProblem<P> {
     type I = MultiInput<P::I>;
     type O = MultiOutput<P::O>;
@@ -274,9 +311,17 @@ pub trait Solver<P: Problem> {
 }
 
 impl<P: Problem, S: Solver<P>> Solver<MultiProblem<P>> for MultiSolver<S> {
-    fn solve(&self, problem: &MultiProblem<P>, input: &<MultiProblem<P> as Problem>::I) -> <MultiProblem<P> as Problem>::O {
+    fn solve(
+        &self,
+        problem: &MultiProblem<P>,
+        input: &<MultiProblem<P> as Problem>::I,
+    ) -> <MultiProblem<P> as Problem>::O {
         MultiOutput {
-            outputs: input.inputs.iter().map(|i| self.inner.solve(&problem.inner, i)).collect()
+            outputs: input
+                .inputs
+                .iter()
+                .map(|i| self.inner.solve(&problem.inner, i))
+                .collect(),
         }
     }
 }

@@ -11,15 +11,15 @@ impl RandomSelectSet {
     pub fn new_full(len: usize) -> Self {
         let len_orig = len;
         let len = len.next_power_of_two();
-        let mut tree = iter::repeat_n(0, len).chain(iter::repeat_n(1, len_orig)).chain(iter::repeat_n(0, len - len_orig)).collect::<Box<[_]>>();
+        let mut tree = iter::repeat_n(0, len)
+            .chain(iter::repeat_n(1, len_orig))
+            .chain(iter::repeat_n(0, len - len_orig))
+            .collect::<Box<[_]>>();
         assert_eq!(len * 2, tree.len());
         for i in (1..len).rev() {
             tree[i] = tree[i * 2] + tree[i * 2 + 1];
         }
-        Self {
-            len,
-            tree
-        }
+        Self { len, tree }
     }
 
     pub fn new_empty(len: usize) -> Self {
@@ -58,7 +58,7 @@ impl RandomSelectSet {
                 assert!(a != 0);
                 continue;
             }
-            let rn = rng.random_range(0..a+b);
+            let rn = rng.random_range(0..a + b);
             if rn < b {
                 cur += 1;
             }
@@ -129,7 +129,7 @@ impl RandomSelectSet {
 mod tests {
     use std::collections::BTreeSet;
 
-use super::*;
+    use super::*;
 
     #[test]
     fn rss() {
