@@ -97,12 +97,57 @@ impl RandomSelectSet {
         }
     }
 
+    pub fn remove_min(&mut self) -> Option<usize> {
+        if self.is_empty() {
+            None
+        } else {
+            let mut cur = 1;
+            self.tree[cur] -= 1;
+            while cur < self.len {
+                cur *= 2;
+                if self.tree[cur] == 0 {
+                    cur += 1;
+                }
+                assert_ne!(self.tree[cur], 0);
+                self.tree[cur] -= 1;
+            }
+            Some(cur - self.len)
+        }
+    }
+
     fn update(&mut self, leaf_idx: usize) {
         assert!(leaf_idx >= self.len);
         let mut cur = leaf_idx / 2;
         while cur > 0 {
             self.tree[cur] = self.tree[cur * 2] + self.tree[cur * 2 + 1];
             cur /= 2;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+use super::*;
+
+    #[test]
+    fn rss() {
+        let n = 1000;
+        let mut rss = RandomSelectSet::new_full(n);
+        let mut set = (0..n).collect::<BTreeSet<_>>();
+        let mut rng = rand::rng();
+        for _ in 0..10000 {
+            let ty = rng.random_range(0..3);
+            let x = rng.random_range(0..n);
+            assert_eq!(set.contains(&x), rss.contains(x));
+            if ty == 0 {
+                assert_eq!(set.insert(x), rss.insert(x));
+            } else if ty == 1 {
+                assert_eq!(set.remove(&x), rss.remove(x));
+            } else {
+                assert_eq!(set.pop_first(), rss.remove_min());
+            }
         }
     }
 }
